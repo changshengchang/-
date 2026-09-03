@@ -13,6 +13,7 @@ import { EventForm } from "./components/EventForm";
 import { LayoutCanvas } from "./components/LayoutCanvas";
 import { ExportToolbar } from "./components/ExportToolbar";
 import { convertRemoteImageToDataUrl } from "./utils/exportUtils";
+import { generateSmartDigest } from "./utils/smartEngine";
 import { 
   Sparkles, 
   Download, 
@@ -133,43 +134,69 @@ export default function App() {
   ) => {
     setIsLoading(true);
     try {
-      // Send plan, custom key metrics, and thumbnail references to server-side Gemini
-      const response = await fetch("/api/analyze-event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let digestResult: any = null;
+
+      // 1. Attempt server-side Gemini generation
+      try {
+        const response = await fetch("/api/analyze-event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: targetPlan.title,
+            planContent: targetPlan.planContent,
+            date: targetPlan.date,
+            location: targetPlan.location,
+            organizer: targetPlan.organizer,
+            keyMetrics: targetPlan.keyMetrics || digest?.keyMetrics,
+            photoCount: targetPhotos.length,
+            photos: targetPhotos.slice(0, 3).map((p) => ({
+              id: p.id,
+              name: p.name,
+              dataUrl: p.dataUrl.length < 500000 ? p.dataUrl : undefined,
+            })),
+            preferredStyle: targetPlan.preferredStyle,
+          }),
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          const resJson = await response.json();
+          if (resJson && resJson.success && resJson.data) {
+            digestResult = resJson.data;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("Server AI digest generation unavailable, using smart engine:", apiErr);
+      }
+
+      // 2. Fallback to intelligent client-side generation if server was unreachable or returned non-JSON (e.g. Vercel static 404)
+      if (!digestResult) {
+        digestResult = generateSmartDigest({
           title: targetPlan.title,
           planContent: targetPlan.planContent,
           date: targetPlan.date,
           location: targetPlan.location,
           organizer: targetPlan.organizer,
-          keyMetrics: targetPlan.keyMetrics || digest?.keyMetrics,
           photoCount: targetPhotos.length,
-          photos: targetPhotos.slice(0, 3).map((p) => ({
-            id: p.id,
-            name: p.name,
-            dataUrl: p.dataUrl.length < 500000 ? p.dataUrl : undefined,
-          })),
+          keyMetrics: targetPlan.keyMetrics || digest?.keyMetrics,
           preferredStyle: targetPlan.preferredStyle,
-        }),
-      });
-
-      const resJson = await response.json();
-      if (resJson.success && resJson.data) {
-        const finalDigest = { ...resJson.data };
-        // Strictly preserve manual key metrics if specified by user
-        if (targetPlan.keyMetrics && targetPlan.keyMetrics.length > 0) {
-          finalDigest.keyMetrics = targetPlan.keyMetrics;
-        }
-        setDigest(finalDigest);
-        if (resJson.data.recommendedLayout) {
-          setLayoutStyle(resJson.data.recommendedLayout);
-        }
-        if (resJson.data.recommendedColorTheme) {
-          setTheme(resJson.data.recommendedColorTheme);
-        }
-        setActiveTab("preview");
+          preferredTheme: targetPlan.preferredTheme,
+        });
       }
+
+      const finalDigest = { ...digestResult };
+      // Strictly preserve manual key metrics if specified by user
+      if (targetPlan.keyMetrics && targetPlan.keyMetrics.length > 0) {
+        finalDigest.keyMetrics = targetPlan.keyMetrics;
+      }
+      setDigest(finalDigest);
+      if (digestResult.recommendedLayout) {
+        setLayoutStyle(digestResult.recommendedLayout);
+      }
+      if (digestResult.recommendedColorTheme) {
+        setTheme(digestResult.recommendedColorTheme);
+      }
+      setActiveTab("preview");
     } catch (err) {
       console.error("Failed to generate digest:", err);
     } finally {

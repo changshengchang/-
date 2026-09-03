@@ -22,6 +22,7 @@ import {
   Trash2
 } from "lucide-react";
 import { SAMPLE_PRESETS } from "../data/samplePresets";
+import { extractTextFromFile, extractPlanFromText } from "../utils/documentParser";
 
 interface EventFormProps {
   plan: EventPlanInput;
@@ -130,7 +131,7 @@ export const EventForm: React.FC<EventFormProps> = ({
     updateField("keyMetrics", nextMetrics);
   };
 
-  // Process file upload and trigger AI auto-extraction
+  // Process file upload and trigger AI auto-extraction with robust client fallback
   const handleProcessFile = async (file: File) => {
     if (!file) return;
 
@@ -145,47 +146,79 @@ export const EventForm: React.FC<EventFormProps> = ({
     setExtractSuccessNotice(null);
 
     try {
-      // Convert file to Base64
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string) || "");
-        reader.onerror = (err) => reject(err);
-        reader.readAsDataURL(file);
-      });
+      // 1. Attempt client-side text extraction first (works natively in browser for docx, txt, md)
+      let localText = "";
+      try {
+        localText = await extractTextFromFile(file);
+      } catch (clientParseErr) {
+        console.warn("Client text extraction notice:", clientParseErr);
+      }
 
-      const response = await fetch("/api/extract-plan-from-file", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type || "application/octet-stream",
-          fileBase64: base64Data,
-        }),
-      });
+      // Convert file to Base64 (needed for PDF/images or server-side analysis)
+      let base64Data = "";
+      try {
+        base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string) || "");
+          reader.onerror = (err) => reject(err);
+          reader.readAsDataURL(file);
+        });
+      } catch (b64Err) {
+        console.warn("Base64 conversion failed:", b64Err);
+      }
 
-      const resJson = await response.json();
+      let extractedResult: any = null;
 
-      if (resJson.success && resJson.data) {
-        const extracted = resJson.data;
+      // 2. Attempt server-side AI extraction if endpoint is available
+      try {
+        const response = await fetch("/api/extract-plan-from-file", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            fileBase64: base64Data.length < 5000000 ? base64Data : "",
+            extractedText: localText,
+          }),
+        });
+
+        // Safe JSON parsing check to prevent "Unexpected token 'T'" errors if server returns 404 HTML
+        const contentType = response.headers.get("content-type") || "";
+        if (response.ok && contentType.includes("application/json")) {
+          const resJson = await response.json();
+          if (resJson && resJson.success && resJson.data) {
+            extractedResult = resJson.data;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("Server API extraction unavailable, fallback to client parser:", apiErr);
+      }
+
+      // 3. Fallback to intelligent client-side extractor if server didn't return data (e.g. Vercel static 404)
+      if (!extractedResult && localText && localText.trim().length > 0) {
+        extractedResult = extractPlanFromText(localText, file.name);
+      }
+
+      if (extractedResult) {
         // Auto-populate extracted information
         onChange({
           ...plan,
-          title: extracted.title || plan.title,
-          date: extracted.date || plan.date,
-          location: extracted.location || plan.location,
-          organizer: extracted.organizer || plan.organizer,
-          planContent: extracted.planContent || plan.planContent,
-          preferredStyle: (extracted.preferredStyle as LayoutStyle) || plan.preferredStyle,
-          preferredTheme: (extracted.preferredTheme as ColorTheme) || plan.preferredTheme,
+          title: extractedResult.title || plan.title,
+          date: extractedResult.date || plan.date,
+          location: extractedResult.location || plan.location,
+          organizer: extractedResult.organizer || plan.organizer,
+          planContent: extractedResult.planContent || plan.planContent,
+          preferredStyle: (extractedResult.preferredStyle as LayoutStyle) || plan.preferredStyle,
+          preferredTheme: (extractedResult.preferredTheme as ColorTheme) || plan.preferredTheme,
         });
 
         setUploadedDocName(file.name);
         setExtractSuccessNotice(
-          extracted.extractionNotes ||
+          extractedResult.extractionNotes ||
             `已成功從「${file.name}」擷取活動名稱、日期、地點、主辦單位及成果說明！`
         );
       } else {
-        throw new Error(resJson.error || "無法成功解析該檔案之內容");
+        throw new Error(`無法從「${file.name}」解析出文字內容。若為特殊編碼，請直接於下方貼上企劃文字。`);
       }
     } catch (err: any) {
       console.error("Document extraction failed:", err);

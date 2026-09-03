@@ -179,27 +179,27 @@ async function callGeminiWithFallback(ai: GoogleGenAI, requestConfig: any) {
 // Endpoint: Extract event plan information from uploaded file (PDF, Word, Text, Image)
 app.post("/api/extract-plan-from-file", async (req, res) => {
   try {
-    const { fileName = "", fileType = "", fileBase64 = "" } = req.body;
+    const { fileName = "", fileType = "", fileBase64 = "", extractedText: preExtractedText = "" } = req.body;
 
-    if (!fileBase64) {
-      return res.status(400).json({ success: false, error: "未提供檔案資料" });
+    if (!fileBase64 && !preExtractedText) {
+      return res.status(400).json({ success: false, error: "未提供檔案資料或文字內容" });
     }
 
     // Strip prefix if data URL
-    let pureBase64 = fileBase64;
+    let pureBase64 = fileBase64 || "";
     let detectedMime = fileType;
-    if (fileBase64.includes(";base64,")) {
-      const [header, data] = fileBase64.split(";base64,");
+    if (pureBase64.includes(";base64,")) {
+      const [header, data] = pureBase64.split(";base64,");
       pureBase64 = data;
       if (!detectedMime) {
         detectedMime = header.replace("data:", "");
       }
     }
 
-    const buffer = Buffer.from(pureBase64, "base64");
+    const buffer = pureBase64 ? Buffer.from(pureBase64, "base64") : Buffer.alloc(0);
     const lowerName = (fileName || "").toLowerCase();
 
-    let extractedText = "";
+    let extractedText = preExtractedText || "";
     let isDocx =
       lowerName.endsWith(".docx") ||
       lowerName.endsWith(".doc") ||
@@ -216,10 +216,10 @@ app.post("/api/extract-plan-from-file", async (req, res) => {
       lowerName.endsWith(".json") ||
       detectedMime.startsWith("text/");
 
-    // Handle Word .docx / .doc
-    if (isDocx) {
+    // Handle Word .docx / .doc if not pre-extracted
+    if (!extractedText && isDocx && buffer.length > 0) {
       extractedText = await extractTextFromWordDocument(buffer, fileName);
-    } else if (isTextFile) {
+    } else if (!extractedText && isTextFile && buffer.length > 0) {
       extractedText = buffer.toString("utf-8");
     }
 
