@@ -167,6 +167,16 @@ export const EventForm: React.FC<EventFormProps> = ({
         console.warn("Base64 conversion failed:", b64Err);
       }
 
+      // Pre-extract locally using our high-precision client engine
+      let clientExtracted: any = null;
+      if (localText && localText.trim().length > 0) {
+        try {
+          clientExtracted = extractPlanFromText(localText, file.name);
+        } catch (localParseErr) {
+          console.warn("Client rule extraction warning:", localParseErr);
+        }
+      }
+
       let extractedResult: any = null;
 
       // 2. Attempt server-side AI extraction if endpoint is available
@@ -194,28 +204,43 @@ export const EventForm: React.FC<EventFormProps> = ({
         console.warn("Server API extraction unavailable, fallback to client parser:", apiErr);
       }
 
-      // 3. Fallback to intelligent client-side extractor if server didn't return data (e.g. Vercel static 404)
-      if (!extractedResult && localText && localText.trim().length > 0) {
-        extractedResult = extractPlanFromText(localText, file.name);
+      // Merge server and client extractions intelligently:
+      // If server returned generic fallback placeholders, preserve client's specific detected values!
+      const isGenericDate = (d?: string) => !d || d.includes("近期") || d.includes("規劃中");
+      const isGenericLoc = (l?: string) => !l || l.includes("指定現場") || l.includes("待定");
+      const isGenericOrg = (o?: string) => !o || o.includes("籌劃小組") || o.includes("籌備小組") || o.includes("籌辦委員會");
+
+      let finalResult = extractedResult || clientExtracted;
+      if (extractedResult && clientExtracted) {
+        finalResult = {
+          ...extractedResult,
+          title: extractedResult.title || clientExtracted.title,
+          date: isGenericDate(extractedResult.date) && !isGenericDate(clientExtracted.date) ? clientExtracted.date : (extractedResult.date || clientExtracted.date),
+          location: isGenericLoc(extractedResult.location) && !isGenericLoc(clientExtracted.location) ? clientExtracted.location : (extractedResult.location || clientExtracted.location),
+          organizer: isGenericOrg(extractedResult.organizer) && !isGenericOrg(clientExtracted.organizer) ? clientExtracted.organizer : (extractedResult.organizer || clientExtracted.organizer),
+          planContent: (!extractedResult.planContent || extractedResult.planContent.length < 40) && clientExtracted.planContent ? clientExtracted.planContent : (extractedResult.planContent || clientExtracted.planContent),
+          preferredStyle: extractedResult.preferredStyle || clientExtracted.preferredStyle,
+          preferredTheme: extractedResult.preferredTheme || clientExtracted.preferredTheme,
+        };
       }
 
-      if (extractedResult) {
+      if (finalResult) {
         // Auto-populate extracted information
         onChange({
           ...plan,
-          title: extractedResult.title || plan.title,
-          date: extractedResult.date || plan.date,
-          location: extractedResult.location || plan.location,
-          organizer: extractedResult.organizer || plan.organizer,
-          planContent: extractedResult.planContent || plan.planContent,
-          preferredStyle: (extractedResult.preferredStyle as LayoutStyle) || plan.preferredStyle,
-          preferredTheme: (extractedResult.preferredTheme as ColorTheme) || plan.preferredTheme,
+          title: finalResult.title || plan.title,
+          date: finalResult.date || plan.date,
+          location: finalResult.location || plan.location,
+          organizer: finalResult.organizer || plan.organizer,
+          planContent: finalResult.planContent || plan.planContent,
+          preferredStyle: (finalResult.preferredStyle as LayoutStyle) || plan.preferredStyle,
+          preferredTheme: (finalResult.preferredTheme as ColorTheme) || plan.preferredTheme,
         });
 
         setUploadedDocName(file.name);
         setExtractSuccessNotice(
-          extractedResult.extractionNotes ||
-            `已成功從「${file.name}」擷取活動名稱、日期、地點、主辦單位及成果說明！`
+          finalResult.extractionNotes ||
+            `已成功從「${file.name}」精確智慧萃取活動名稱、日期、地點、主辦單位及成果說明！`
         );
       } else {
         throw new Error(`無法從「${file.name}」解析出文字內容。若為特殊編碼，請直接於下方貼上企劃文字。`);

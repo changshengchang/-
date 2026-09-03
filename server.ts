@@ -5,6 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 import mammoth from "mammoth";
 import JSZip from "jszip";
+import { extractPlanFromDocumentText, extractTextFromDocxArrayBuffer } from "./src/utils/planExtractor";
 
 dotenv.config();
 
@@ -81,7 +82,18 @@ function cleanTextForAI(text: string): string {
 
 // Multi-tier text extractor for Word documents (.docx, .doc)
 async function extractTextFromWordDocument(buffer: Buffer, fileName: string): Promise<string> {
-  // Strategy 1: Mammoth (Primary for standard .docx)
+  // Strategy 1: Direct OOXML parsing via JSZip (pure, comprehensive, table-aware)
+  try {
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+    const extracted = await extractTextFromDocxArrayBuffer(arrayBuffer);
+    if (extracted && extracted.trim().length > 10) {
+      return extracted.trim();
+    }
+  } catch (zipErr: any) {
+    console.warn("Direct docx extraction warning:", zipErr?.message);
+  }
+
+  // Strategy 2: Mammoth (Secondary for standard .docx)
   try {
     const result = await mammoth.extractRawText({ buffer });
     if (result.value && result.value.trim().length > 10) {
@@ -91,7 +103,7 @@ async function extractTextFromWordDocument(buffer: Buffer, fileName: string): Pr
     console.warn("Mammoth docx extraction warning:", docxErr?.message);
   }
 
-  // Strategy 2: Direct OOXML parsing via JSZip (for non-standard .docx archives)
+  // Strategy 3: Direct OOXML file scan via JSZip
   try {
     const zip = await JSZip.loadAsync(buffer);
     const xmlFiles = Object.keys(zip.files).filter(
@@ -135,7 +147,7 @@ async function extractTextFromWordDocument(buffer: Buffer, fileName: string): Pr
     console.warn("JSZip docx fallback warning:", zipErr?.message);
   }
 
-  // Strategy 3: Binary string scan for older .doc or RTF documents
+  // Strategy 4: Binary string scan for older .doc or RTF documents
   try {
     const utf16Str = buffer.toString("utf16le");
     const utf16Matches = utf16Str.match(/[\u4e00-\u9fa5\w\s.,;:?!，。、；：？！（）《》「」『』\-\/]{4,}/g);
@@ -325,84 +337,7 @@ app.post("/api/extract-plan-from-file", async (req, res) => {
 
 // Enhanced smart rule extractor for document text
 function fallbackExtractPlan(fileName: string, text: string) {
-  const cleanFileName = fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").trim();
-  
-  // Date detection
-  let date = "";
-  const dateMatch =
-    text.match(/(?:活動日期|舉辦日期|日期|時間|舉辦時間|期程|活動時程)[：:\s]+([^\n\r]+)/i) ||
-    text.match(/(\d{4}[年/.-]\d{1,2}[月/.-]\d{1,2}[日號]?(?:\s*[-~至到]\s*\d{1,2}[日號]?)?)/);
-  if (dateMatch) date = dateMatch[1].trim();
-
-  // Location detection
-  let location = "";
-  const locMatch = text.match(/(?:活動地點|舉辦地點|地點|場地|會議地點|研習場地)[：:\s]+([^\n\r]+)/i);
-  if (locMatch) location = locMatch[1].trim();
-
-  // Organizer detection
-  let organizer = "";
-  const orgMatch = text.match(/(?:主辦單位|主辦機構|主辦|籌備單位|承辦單位|執行單位|指導單位)[：:\s]+([^\n\r]+)/i);
-  if (orgMatch) organizer = orgMatch[1].trim();
-
-  // Title detection
-  let title = "";
-  const titleMatch = text.match(/(?:活動名稱|活動企劃名稱|企劃案名稱|活動主題|主題|專案名稱)[：:\s]+([^\n\r]+)/i);
-  if (titleMatch) {
-    title = titleMatch[1].trim();
-  } else if (cleanFileName) {
-    title = cleanFileName;
-  } else {
-    title = "年度卓越活動成果紀實";
-  }
-
-  // Plan & Results Content
-  let planContent = "";
-  // Look for sections like 成果說明, 計畫內容, 核心目標, etc.
-  const contentSectionMatch = text.match(/(?:【?(?:計畫內容|活動計畫|活動宗旨|成果說明|執行成果|活動效益|核心目標|活動概述)】?[：:\s]+)([\s\S]{30,800})/i);
-  if (contentSectionMatch) {
-    planContent = contentSectionMatch[1].trim().slice(0, 550);
-  } else if (text && text.trim().length > 30) {
-    // Take cleaned non-empty lines
-    const paragraphs = text
-      .split(/\n+/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 15 && !p.startsWith("主辦") && !p.startsWith("日期") && !p.startsWith("地點"));
-    planContent = paragraphs.slice(0, 4).join("\n\n").slice(0, 500);
-  }
-
-  if (!planContent) {
-    planContent = `本活動「${title}」藉由精實之企劃與執行，成功串聯各項資源與團隊熱情。\n活動聚焦於核心價值創造與實踐，各階段工作坊與精彩成果獲得全體與會者熱烈迴響，展現高度向心力與豐碩成果。`;
-  }
-
-  // Determine smart style and theme based on text keywords
-  let preferredStyle = "magazine";
-  let preferredTheme = "slate";
-
-  const lowerAll = (text + " " + title).toLowerCase();
-  if (lowerAll.includes("公務") || lowerAll.includes("機關") || lowerAll.includes("行政") || lowerAll.includes("研討會") || lowerAll.includes("年會")) {
-    preferredStyle = "executive";
-    preferredTheme = "slate";
-  } else if (lowerAll.includes("展覽") || lowerAll.includes("畫廊") || lowerAll.includes("影像") || lowerAll.includes("藝術") || lowerAll.includes("攝影")) {
-    preferredStyle = "gallery";
-    preferredTheme = "amber";
-  } else if (lowerAll.includes("歷程") || lowerAll.includes("週年") || lowerAll.includes("回顧") || lowerAll.includes("年表")) {
-    preferredStyle = "chronicle";
-    preferredTheme = "forest";
-  } else if (lowerAll.includes("青年") || lowerAll.includes("創客") || lowerAll.includes("設計") || lowerAll.includes("工作坊") || lowerAll.includes("黑客松")) {
-    preferredStyle = "magazine";
-    preferredTheme = "terracotta";
-  }
-
-  return {
-    title: title || "卓越活動成果發表",
-    date: date || "2026年近期",
-    location: location || "活動指定現場",
-    organizer: organizer || "活動籌備小組",
-    planContent,
-    preferredStyle,
-    preferredTheme,
-    extractionNotes: `已成功辨識「${fileName}」並精準萃取活動名稱、期程、地點與成果說明！`,
-  };
+  return extractPlanFromDocumentText(text, fileName);
 }
 
 // AI analysis and layout suggestion endpoint
