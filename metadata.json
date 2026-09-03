@@ -1,0 +1,6 @@
+{
+  "name": "活動紀實與圖片排版摘要器",
+  "description": "自動整合活動照片與企劃內容，智慧生成精緻排版、活動摘要重點與圖文報導，並支援一鍵匯出高畫質相片檔與 PDF 成果報告。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
