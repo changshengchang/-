@@ -187,7 +187,7 @@ export const EventForm: React.FC<EventFormProps> = ({
           body: JSON.stringify({
             fileName: file.name,
             fileType: file.type || "application/octet-stream",
-            fileBase64: base64Data.length < 25000000 ? base64Data : "",
+            fileBase64: base64Data.length < 3500000 ? base64Data : "",
             extractedText: localText,
           }),
         });

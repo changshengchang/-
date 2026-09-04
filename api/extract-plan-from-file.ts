@@ -3,6 +3,7 @@ import mammoth from "mammoth";
 import JSZip from "jszip";
 import { 
   extractPlanFromDocumentText, 
+  extractTextFromDocBinaryArrayBuffer,
   extractTextFromDocxArrayBuffer 
 } from "../src/utils/planExtractor";
 import { extractTextFromPdfArrayBuffer } from "../src/utils/pdfExtractor";
@@ -51,11 +52,8 @@ export default async function handler(req: any, res: any) {
     const lowerName = (fileName || "").toLowerCase();
 
     let extractedText = preExtractedText || "";
-    const isDocx =
-      lowerName.endsWith(".docx") ||
-      lowerName.endsWith(".doc") ||
-      detectedMime.includes("wordprocessingml") ||
-      detectedMime.includes("msword");
+    const isDoc = lowerName.endsWith(".doc") || detectedMime.includes("msword");
+    const isDocx = lowerName.endsWith(".docx") || detectedMime.includes("wordprocessingml");
     const isPdf = lowerName.endsWith(".pdf") || detectedMime.includes("pdf");
     const isImage =
       detectedMime.startsWith("image/") ||
@@ -67,7 +65,17 @@ export default async function handler(req: any, res: any) {
       lowerName.endsWith(".json") ||
       detectedMime.startsWith("text/");
 
-    if (!extractedText && isDocx && buffer.length > 0) {
+    if (!extractedText && isDoc && buffer.length > 0) {
+      try {
+        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        const docText = extractTextFromDocBinaryArrayBuffer(arrayBuffer);
+        if (docText && docText.trim().length > 10) {
+          extractedText = docText.trim();
+        }
+      } catch (docErr) {
+        console.warn("Direct doc binary extraction warning in Vercel function:", docErr);
+      }
+    } else if (!extractedText && isDocx && buffer.length > 0) {
       try {
         const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
         const docxText = await extractTextFromDocxArrayBuffer(arrayBuffer);
@@ -112,25 +120,25 @@ export default async function handler(req: any, res: any) {
     if (ai) {
       try {
         const promptInstruction = `
-你是一位具備頂尖文件解析與企劃審閱能力的資深活動專案總監。
-使用者上傳了一份活動企劃/企劃書文件（檔案名稱：「${fileName || "活動計畫文件"}」）。
+你是一位具備頂尖公文與企劃文件解析能力的資深活動專案總監。
+使用者上傳了一份活動計畫/實施計畫文件（檔案名稱：「${fileName || "活動計畫文件"}」）。
 
-請仔細閱讀並精準擷取、歸納出以下核心資訊，輸出結構化繁體中文：
-1. title: 活動主題名稱（精準、完整、大器）
-2. date: 活動日期（如：2026年9月15日 或 113年10月20日 09:00-17:00，必須從文件中精確抓取真實日期時間）
-3. location: 活動地點 / 舉辦場地（必須從文件中精確抓取真實地點或會議室）
-4. organizer: 主辦單位 / 籌備團隊（必須從文件中抓取真實主辦/指導單位）
-5. planContent: 活動計畫內容及成果說明（梳理並整理成結構完整、條理分明、專業流暢的繁體中文說明，約 200-450 字）
+請仔細閱讀並精準擷取、梳理出以下核心資訊，輸出結構化繁體中文：
+1. title: 活動主題名稱（請擷取文件中最完整且具體的正式活動名稱，如「苗栗縣三義鄉公所115年度親子活動實施計畫」，務必保留機關名、年度與實施計畫字樣，請勿簡化為泛稱）
+2. date: 活動日期（從文件中精確抓取真實日期時間，若為民國年如 115 年 8 月 7 日，請轉換為西元年如「2026年8月7日」或保留確切日期，請去除「如遇天候或不可抗力」等附屬條款）
+3. location: 活動地點 / 舉辦場地（從文件中精確抓取真實地點，若文中為「本機關辦公場所及本鄉西湖渡假村」，請結合主辦機關名稱解析為具體地點如「苗栗縣三義鄉公所辦公場所及西湖渡假村」）
+4. organizer: 主辦單位 / 籌備團隊（從文件中抓取真實主辦/主責單位，若主辦單位僅寫處室如「人事室」，請結合機關全銜如「苗栗縣三義鄉公所（人事室）」）
+5. planContent: 該次活動計畫內容與成果說明（請將文件中的活動目的宗旨、詳細流程安排、重要體驗行程、經費勻支與預期效益價值，梳理撰寫成一篇約 250-450 字結構完整、條理清晰、文筆通暢的專業繁體中文敘述）
 6. preferredStyle: 依據活動性質推薦最合適之排版風格 ('magazine' | 'executive' | 'gallery' | 'chronicle')
 7. preferredTheme: 依據活動調性推薦合適之主題色彩 ('slate' | 'indigo' | 'forest' | 'terracotta' | 'amber')
 8. extractionNotes: 一句簡潔友善的辨識完成說明
 `;
         const parts: any[] = [{ text: promptInstruction }];
-        if (isPdf && pureBase64) {
+        if (isPdf && pureBase64 && pureBase64.length < 4000000) {
           parts.push({
             inlineData: { mimeType: "application/pdf", data: pureBase64 },
           });
-        } else if (isImage && pureBase64) {
+        } else if (isImage && pureBase64 && pureBase64.length < 4000000) {
           parts.push({
             inlineData: { mimeType: detectedMime || "image/jpeg", data: pureBase64 },
           });
@@ -140,8 +148,8 @@ export default async function handler(req: any, res: any) {
           });
         }
 
-        // Try gemini-3.6-flash, fallback to gemini-3.8-flash
-        const modelsToTry = ["gemini-3.6-flash", "gemini-3.8-flash"];
+        // Try gemini-3.8-flash, fallback to gemini-3.6-flash
+        const modelsToTry = ["gemini-3.8-flash", "gemini-3.6-flash"];
         let responseText = "";
 
         for (const modelName of modelsToTry) {

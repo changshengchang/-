@@ -1,5 +1,6 @@
 import { ColorTheme, LayoutStyle } from "../types";
 import { 
+  extractTextFromDocBinaryArrayBuffer,
   extractTextFromDocxArrayBuffer, 
   extractPlanFromDocumentText,
   ExtractedPlanData 
@@ -43,7 +44,20 @@ export async function extractTextFromFile(file: File): Promise<string> {
     }
   }
 
-  // 3. Word .docx file (Pure JSZip + OOXML extraction, works 100% in browser and Node)
+  // 3. Word .doc file (Binary Word 97-2004 format)
+  if (lowerName.endsWith(".doc") || file.type.includes("msword")) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const extracted = extractTextFromDocBinaryArrayBuffer(arrayBuffer);
+      if (extracted && extracted.trim().length > 10) {
+        return extracted.trim();
+      }
+    } catch (docErr) {
+      console.warn("Doc parsing warning in extractTextFromFile:", docErr);
+    }
+  }
+
+  // 4. Word .docx file (Pure JSZip + OOXML extraction, works 100% in browser and Node)
   if (lowerName.endsWith(".docx") || file.type.includes("wordprocessingml")) {
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -56,7 +70,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
     }
   }
 
-  // 4. Fallback: try reading as arrayBuffer text or file.text()
+  // 5. Fallback: try reading as arrayBuffer text or file.text()
   try {
     const raw = await file.text();
     // Check if it's text-like (contains Chinese or ASCII without null bytes)
