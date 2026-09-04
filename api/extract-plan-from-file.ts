@@ -5,6 +5,7 @@ import {
   extractPlanFromDocumentText, 
   extractTextFromDocxArrayBuffer 
 } from "../src/utils/planExtractor";
+import { extractTextFromPdfArrayBuffer } from "../src/utils/pdfExtractor";
 
 function getAiClient(): GoogleGenAI | null {
   if (!process.env.GEMINI_API_KEY) return null;
@@ -86,6 +87,16 @@ export default async function handler(req: any, res: any) {
         } catch (mErr) {
           console.warn("Mammoth extraction warning in Vercel function:", mErr);
         }
+      }
+    } else if (!extractedText && isPdf && buffer.length > 0) {
+      try {
+        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        const pdfText = await extractTextFromPdfArrayBuffer(arrayBuffer);
+        if (pdfText && pdfText.trim().length > 10) {
+          extractedText = pdfText.trim();
+        }
+      } catch (pdfErr) {
+        console.warn("PDF extraction warning in Vercel function:", pdfErr);
       }
     } else if (!extractedText && isTextFile && buffer.length > 0) {
       extractedText = buffer.toString("utf-8");

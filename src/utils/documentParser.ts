@@ -4,12 +4,13 @@ import {
   extractPlanFromDocumentText,
   ExtractedPlanData 
 } from "./planExtractor";
+import { extractTextFromPdfArrayBuffer } from "./pdfExtractor";
 
 export type { ExtractedPlanData };
 
 /**
  * Extract raw text from file directly in browser or server.
- * Handles .docx, .doc, .txt, .md, .csv, .json seamlessly.
+ * Handles .pdf, .docx, .doc, .txt, .md, .csv, .json seamlessly.
  */
 export async function extractTextFromFile(file: File): Promise<string> {
   const lowerName = file.name.toLowerCase();
@@ -29,7 +30,20 @@ export async function extractTextFromFile(file: File): Promise<string> {
     }
   }
 
-  // 2. Word .docx file (Pure JSZip + OOXML extraction, works 100% in browser and Node)
+  // 2. PDF Document (.pdf) - Extracts text from all pages
+  if (lowerName.endsWith(".pdf") || file.type.includes("pdf")) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const extracted = await extractTextFromPdfArrayBuffer(arrayBuffer);
+      if (extracted && extracted.trim().length > 0) {
+        return extracted.trim();
+      }
+    } catch (pdfErr) {
+      console.warn("PDF parsing warning in extractTextFromFile:", pdfErr);
+    }
+  }
+
+  // 3. Word .docx file (Pure JSZip + OOXML extraction, works 100% in browser and Node)
   if (lowerName.endsWith(".docx") || file.type.includes("wordprocessingml")) {
     try {
       const arrayBuffer = await file.arrayBuffer();
@@ -42,7 +56,7 @@ export async function extractTextFromFile(file: File): Promise<string> {
     }
   }
 
-  // 3. Fallback: try reading as arrayBuffer text or file.text()
+  // 4. Fallback: try reading as arrayBuffer text or file.text()
   try {
     const raw = await file.text();
     // Check if it's text-like (contains Chinese or ASCII without null bytes)

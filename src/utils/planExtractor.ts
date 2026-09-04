@@ -111,8 +111,11 @@ export function extractPlanFromDocumentText(rawText: string, fileName?: string):
   const cleanFileName = (fileName || "")
     .replace(/\.[^/.]+$/, "")
     .replace(/^(活動|專案|企劃|計畫|成果|報告)+[_\-\s]*/g, "")
-    .replace(/[_\-\s]*(企劃書|計畫書|成果報告|紀實|簡章|方案)$/g, "")
+    .replace(/[_\-\s]*(企劃書|計畫書|實施計畫|實施方案|成果報告|紀實|簡章|方案)$/g, "")
     .trim();
+
+  // Preserved raw title from filename without extension
+  const rawFileNameTitle = (fileName || "").replace(/\.[^/.]+$/, "").trim();
 
   // ----------------------------------------------------
   // 1. 活動名稱 (Title)
@@ -150,7 +153,15 @@ export function extractPlanFromDocumentText(rawText: string, fileName?: string):
   }
 
   if (!title && cleanFileName && cleanFileName.length >= 3) {
-    title = cleanFileName;
+    // If clean filename starts with 115 or other ROC year, e.g. 115親子活動 -> 115年度親子活動實施計畫
+    if (/^11\d/.test(cleanFileName) && !cleanFileName.includes("年度")) {
+      title = cleanFileName.replace(/^(11\d)/, "$1年度");
+    } else {
+      title = cleanFileName;
+    }
+  }
+  if (!title && rawFileNameTitle && rawFileNameTitle.length >= 3) {
+    title = rawFileNameTitle;
   }
   if (!title) {
     title = lines[0] ? lines[0].slice(0, 35) : "年度卓越活動成果紀實";
@@ -195,9 +206,15 @@ export function extractPlanFromDocumentText(rawText: string, fileName?: string):
     }
   }
 
+  // If still no date, infer from ROC year in title or filename
   if (!date) {
-    const now = new Date();
-    date = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+    const rocYearMatch = (rawFileNameTitle + " " + title).match(/(?:民國\s*)?(11\d)(?:年度|年)?/);
+    if (rocYearMatch) {
+      date = `民國${rocYearMatch[1]}年（2026年）`;
+    } else {
+      const now = new Date();
+      date = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`;
+    }
   }
 
   // ----------------------------------------------------
@@ -347,7 +364,11 @@ export function extractPlanFromDocumentText(rawText: string, fileName?: string):
 
   // Final fallback with rich summary
   if (!planContent || planContent.length < 30) {
-    planContent = `本活動「${title}」由「${organizer}」精心策劃並順利舉辦。\n透過多元化的主題議程、實務交流與成果展示，成功匯聚全體與會夥伴之向心力與專業智慧。\n活動期間交流氣氛熱烈，圓滿達成各項計畫指標，為後續之深化發展建立堅實之良好基石。`;
+    if (clean.includes("親子") || (title + " " + rawFileNameTitle).includes("親子")) {
+      planContent = `本活動「${title}」由「${organizer}」精心策劃並順利舉辦。\n透過多元化的親子互動體驗、共學闖關與創意成果展演，有效增進家庭成員情誼並營造溫馨正向的共育氛圍。\n活動現場親師生交流熱絡，深獲全體家長與孩童好評迴響，圓滿達成各項教育推廣與核心成效目標。`;
+    } else {
+      planContent = `本活動「${title}」由「${organizer}」精心策劃並順利舉辦。\n透過多元化的主題議程、實務交流與成果展示，成功匯聚全體與會夥伴之向心力與專業智慧。\n活動期間交流氣氛熱烈，圓滿達成各項計畫指標，為後續之深化發展建立堅實之良好基石。`;
+    }
   }
 
   // Truncate to reasonable length (approx 650 chars max for prompt / layout)
@@ -361,8 +382,16 @@ export function extractPlanFromDocumentText(rawText: string, fileName?: string):
   let preferredStyle: LayoutStyle = "magazine";
   let preferredTheme: ColorTheme = "slate";
 
-  const allText = (clean + " " + title).toLowerCase();
+  const allText = (clean + " " + title + " " + rawFileNameTitle).toLowerCase();
   if (
+    allText.includes("親子") ||
+    allText.includes("家庭") ||
+    allText.includes("童") ||
+    allText.includes("家長")
+  ) {
+    preferredStyle = "magazine";
+    preferredTheme = "amber";
+  } else if (
     allText.includes("公務") ||
     allText.includes("機關") ||
     allText.includes("研討會") ||

@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import mammoth from "mammoth";
 import JSZip from "jszip";
 import { extractPlanFromDocumentText, extractTextFromDocxArrayBuffer } from "./src/utils/planExtractor";
+import { extractTextFromPdfArrayBuffer } from "./src/utils/pdfExtractor";
 
 dotenv.config();
 
@@ -231,6 +232,16 @@ app.post("/api/extract-plan-from-file", async (req, res) => {
     // Handle Word .docx / .doc if not pre-extracted
     if (!extractedText && isDocx && buffer.length > 0) {
       extractedText = await extractTextFromWordDocument(buffer, fileName);
+    } else if (!extractedText && isPdf && buffer.length > 0) {
+      try {
+        const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+        const pdfText = await extractTextFromPdfArrayBuffer(arrayBuffer);
+        if (pdfText && pdfText.trim().length > 10) {
+          extractedText = pdfText.trim();
+        }
+      } catch (pdfErr) {
+        console.warn("Server PDF text extraction notice:", pdfErr);
+      }
     } else if (!extractedText && isTextFile && buffer.length > 0) {
       extractedText = buffer.toString("utf-8");
     }
