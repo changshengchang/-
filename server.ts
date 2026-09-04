@@ -324,7 +324,19 @@ app.post("/api/extract-plan-from-file", async (req, res) => {
 
         const parsed = JSON.parse(response.text?.trim() || "{}");
         if (parsed.title || parsed.planContent) {
-          return res.json({ success: true, data: parsed });
+          const smartParsed = fallbackExtractPlan(fileName, extractedText);
+          const isGenericDate = (d: string) => !d || d.includes("近期") || d.includes("規劃中") || d.includes("（2026年）");
+          const isGenericLoc = (l: string) => !l || l.includes("指定現場") || l.includes("待定");
+          const isGenericOrg = (o: string) => !o || o.includes("籌劃小組") || o.includes("籌備小組") || o.includes("籌辦委員會");
+
+          const finalData = {
+            ...parsed,
+            date: isGenericDate(parsed.date) && !isGenericDate(smartParsed.date) ? smartParsed.date : parsed.date,
+            location: isGenericLoc(parsed.location) && !isGenericLoc(smartParsed.location) ? smartParsed.location : parsed.location,
+            organizer: isGenericOrg(parsed.organizer) && !isGenericOrg(smartParsed.organizer) ? smartParsed.organizer : parsed.organizer,
+            planContent: (!parsed.planContent || parsed.planContent.length < 40 || parsed.planContent.includes("精心策劃並順利舉辦")) && smartParsed.planContent ? smartParsed.planContent : parsed.planContent,
+          };
+          return res.json({ success: true, data: finalData });
         }
       } catch (aiErr: any) {
         console.warn("AI extraction encountered issue, falling back to smart local extractor:", aiErr?.message);

@@ -206,7 +206,7 @@ export const EventForm: React.FC<EventFormProps> = ({
 
       // Merge server and client extractions intelligently:
       // If server returned generic fallback placeholders, preserve client's specific detected values!
-      const isGenericDate = (d?: string) => !d || d.includes("近期") || d.includes("規劃中");
+      const isGenericDate = (d?: string) => !d || d.includes("近期") || d.includes("規劃中") || d.includes("（2026年）");
       const isGenericLoc = (l?: string) => !l || l.includes("指定現場") || l.includes("待定");
       const isGenericOrg = (o?: string) => !o || o.includes("籌劃小組") || o.includes("籌備小組") || o.includes("籌辦委員會");
 
@@ -218,7 +218,7 @@ export const EventForm: React.FC<EventFormProps> = ({
           date: isGenericDate(extractedResult.date) && !isGenericDate(clientExtracted.date) ? clientExtracted.date : (extractedResult.date || clientExtracted.date),
           location: isGenericLoc(extractedResult.location) && !isGenericLoc(clientExtracted.location) ? clientExtracted.location : (extractedResult.location || clientExtracted.location),
           organizer: isGenericOrg(extractedResult.organizer) && !isGenericOrg(clientExtracted.organizer) ? clientExtracted.organizer : (extractedResult.organizer || clientExtracted.organizer),
-          planContent: (!extractedResult.planContent || extractedResult.planContent.length < 40) && clientExtracted.planContent ? clientExtracted.planContent : (extractedResult.planContent || clientExtracted.planContent),
+          planContent: (!extractedResult.planContent || extractedResult.planContent.length < 40 || extractedResult.planContent.includes("精心策劃並順利舉辦")) && clientExtracted.planContent ? clientExtracted.planContent : (extractedResult.planContent || clientExtracted.planContent),
           preferredStyle: extractedResult.preferredStyle || clientExtracted.preferredStyle,
           preferredTheme: extractedResult.preferredTheme || clientExtracted.preferredTheme,
         };

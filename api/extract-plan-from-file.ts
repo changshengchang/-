@@ -185,15 +185,16 @@ export default async function handler(req: any, res: any) {
         if (responseText) {
           const parsed = JSON.parse(responseText);
           // If smart rule parsed has concrete specific values and AI gave generic values, preserve concrete values
-          const isGenericDate = (d: string) => !d || d.includes("近期") || d.includes("規劃中");
+          const isGenericDate = (d: string) => !d || d.includes("近期") || d.includes("規劃中") || d.includes("（2026年）");
           const isGenericLoc = (l: string) => !l || l.includes("指定現場") || l.includes("待定");
-          const isGenericOrg = (o: string) => !o || o.includes("籌劃小組") || o.includes("籌辦小組");
+          const isGenericOrg = (o: string) => !o || o.includes("籌劃小組") || o.includes("籌辦小組") || o.includes("籌辦委員會");
 
           const finalData = {
             ...parsed,
             date: isGenericDate(parsed.date) && !isGenericDate(smartParsed.date) ? smartParsed.date : parsed.date,
             location: isGenericLoc(parsed.location) && !isGenericLoc(smartParsed.location) ? smartParsed.location : parsed.location,
             organizer: isGenericOrg(parsed.organizer) && !isGenericOrg(smartParsed.organizer) ? smartParsed.organizer : parsed.organizer,
+            planContent: (!parsed.planContent || parsed.planContent.length < 40 || parsed.planContent.includes("精心策劃並順利舉辦")) && smartParsed.planContent ? smartParsed.planContent : parsed.planContent,
           };
 
           return res.status(200).json({ success: true, data: finalData, engine: "gemini-ai" });
